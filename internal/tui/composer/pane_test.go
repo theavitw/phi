@@ -220,6 +220,7 @@ func TestShowBranchListDrawsRowsAndRoutesAccept(t *testing.T) {
 		},
 		[]string{"fix/x"},
 		func(name string) { accepted = append(accepted, name) },
+		nil,
 	)
 
 	// 80 columns is the narrow end worth guarding: the branch name column must
@@ -287,7 +288,7 @@ func TestListAcceptHandlerIsNotSharedBetweenDomains(t *testing.T) {
 	c.ShowList(nil, listpicker.ShowConfig{}, func(item listpicker.Item) { sessions = append(sessions, item.ID) }, nil)
 	c.ShowBranchList([]gitx.Branch{{Name: "main", Current: true}}, nil, func(name string) {
 		branches = append(branches, name)
-	})
+	}, nil)
 
 	c.listPicker.Items = []listpicker.Item{{ID: "main", Badge: "current"}}
 	c.listPicker.Handle(&components.EventContext{}, xui.KeyEvent{Press: true, Code: xui.KeyEnter})
@@ -298,17 +299,58 @@ func TestListAcceptHandlerIsNotSharedBetweenDomains(t *testing.T) {
 
 func TestListDeleteHandlerIsNotSharedBetweenDomains(t *testing.T) {
 	c := NewComposerPane(components.DefaultTheme(), "m", "/repo")
-	var deleted []string
-	c.ShowSessionList(nil, "", nil, func(id string) { deleted = append(deleted, id) })
-	c.ShowBranchList([]gitx.Branch{{Name: "main", Current: true}}, nil, nil)
+	var sessions, branches []string
+	c.ShowSessionList(nil, "", nil, func(id string) { sessions = append(sessions, id) })
+	c.ShowBranchList([]gitx.Branch{{Name: "main", Current: true}}, nil, nil, func(name string) {
+		branches = append(branches, name)
+	})
 
-	// ctrl+x must stay inert on the branch picker: the session delete path
-	// was cleared when the second domain took over the shared instance.
+	// The branch picker owns its own delete path: ctrl+x must land there, not
+	// on the session handler it replaced on the shared picker instance.
 	ctx := &components.EventContext{}
 	c.listPicker.Items = []listpicker.Item{{ID: "main"}}
 	c.listPicker.Handle(ctx, xui.KeyEvent{Press: true, Code: xui.KeyRune, Rune: 'x', Mods: xui.ModCtrl})
 	c.listPicker.Handle(ctx, xui.KeyEvent{Press: true, Code: xui.KeyRune, Rune: 'y'})
-	assert.Empty(t, deleted, "opening a branch picker must clear the session delete path")
+	assert.Equal(t, []string{"main"}, branches)
+	assert.Empty(t, sessions, "opening a branch picker must clear the session delete path")
+}
+
+// A remote row deletes as itself and still accepts as the local branch that
+// tracks it — the two refs are one row, two operations.
+func TestShowBranchListSplitsAcceptAndDeleteIdentities(t *testing.T) {
+	c := NewComposerPane(components.DefaultTheme(), "m", "/repo")
+	var accepted, deleted []string
+	c.ShowBranchList(
+		[]gitx.Branch{{Name: "feat"}, {Name: "origin/feat", Remote: true}},
+		nil,
+		func(name string) { accepted = append(accepted, name) },
+		func(name string) { deleted = append(deleted, name) },
+	)
+
+	ctx := &components.EventContext{}
+	c.listPicker.Handle(ctx, xui.KeyEvent{Press: true, Code: xui.KeyDown})
+	c.listPicker.Handle(ctx, xui.KeyEvent{Press: true, Code: xui.KeyRune, Rune: 'x', Mods: xui.ModCtrl})
+	c.listPicker.Handle(ctx, xui.KeyEvent{Press: true, Code: xui.KeyRune, Rune: 'y'})
+	assert.Equal(t, []string{"origin/feat"}, deleted, "origin/feat is not the local feat")
+
+	c.listPicker.Handle(ctx, xui.KeyEvent{Press: true, Code: xui.KeyEnter})
+	assert.Equal(t, []string{"feat"}, accepted, "accepting the remote row checks out its tracking branch")
+}
+
+func TestRefreshBranchListKeepsOpenPickerInPlace(t *testing.T) {
+	c := NewComposerPane(components.DefaultTheme(), "m", "/repo")
+	c.ShowBranchList([]gitx.Branch{{Name: "main"}, {Name: "fix/x"}}, nil, nil, nil)
+	c.listPicker.Query = "fix"
+
+	c.RefreshBranchList([]gitx.Branch{{Name: "main"}}, nil)
+	assert.True(t, c.listPicker.Open)
+	assert.Equal(t, "fix", c.listPicker.Query, "refresh keeps the filter")
+	require.Len(t, c.listPicker.Items, 1)
+	assert.Equal(t, "main", c.listPicker.Items[0].ID)
+
+	c.listPicker.Hide()
+	c.RefreshBranchList([]gitx.Branch{{Name: "fix/x"}}, nil)
+	assert.False(t, c.listPicker.Open, "a closed picker stays closed")
 }
 
 func TestShowSessionListRoutesDelete(t *testing.T) {
@@ -337,4 +379,52 @@ func TestRefreshSessionListKeepsOpenPickerInPlace(t *testing.T) {
 	c.listPicker.Hide()
 	c.RefreshSessionList([]session.SessionMeta{{ID: "a"}}, "")
 	assert.False(t, c.listPicker.Open)
+}
+
+// TestQuestionShortcutItemsHideRecallByDefault keeps Up/Down out of `?` unless
+// the recall store is wired, since the keys do nothing otherwise.
+func TestQuestionShortcutItemsHideRecallByDefault(t *testing.T) {
+	off := questionShortcutItems(false)
+	assert.Empty(t, filterQuestionItems("recall", off))
+	assert.Empty(t, filterQuestionItems("Up/Down", off))
+
+	on := questionShortcutItems(true)
+	recall := filterQuestionItems("recall", on)
+	require.Len(t, recall, 1)
+	assert.Equal(t, "Up/Down, Ctrl+P/Ctrl+N", recall[0].Path)
+	assert.Len(t, filterQuestionItems("ctrl+n", on), 1, "either key form finds the row")
+}
+
+// fakePromptHistory is an in-memory PromptHistory for the composer tests.
+type fakePromptHistory struct{ entries []string }
+
+func (f *fakePromptHistory) Entries() []string { return append([]string(nil), f.entries...) }
+
+func (f *fakePromptHistory) Append(text string) error {
+	f.entries = append(f.entries, text)
+	return nil
+}
+
+func TestRememberPromptSkipsCommands(t *testing.T) {
+	c, _ := wiredComposer(t)
+	h := &fakePromptHistory{}
+	c.SetPromptHistory(h)
+
+	c.Chat.OnSubmit("hello")
+	c.Chat.OnSubmit("/new")
+	c.Chat.OnSubmit("!ls")
+	c.Chat.OnSubmit("   ")
+
+	assert.Equal(t, []string{"hello"}, h.entries)
+	assert.Equal(t, []string{"hello"}, c.Chat.History, "the recall ring follows the store")
+}
+
+func TestSetPromptHistoryLoadsExisting(t *testing.T) {
+	c, _ := wiredComposer(t)
+	c.SetPromptHistory(&fakePromptHistory{entries: []string{"one", "two"}})
+	assert.Equal(t, []string{"one", "two"}, c.Chat.History)
+
+	// A nil store leaves recall untouched (no session directory case).
+	c.SetPromptHistory(nil)
+	assert.Equal(t, []string{"one", "two"}, c.Chat.History)
 }

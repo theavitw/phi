@@ -10,13 +10,25 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
-- Models: gateway aliases and explicit `preset` bindings.
-- Models: per-model `request_parameters` overrides for all four APIs,
-  including compaction.
+- Extensions can register models (`RegisterModel`) in two connection modes:
+  direct-connect — the host dials `base_url` like a config.yaml entry — or
+  extension-served (`Conn: ext`), where the extension proxies or generates
+  every request itself and streams deltas back over PXB with cooperative
+  cancel. Extension model names shadow same-name config entries and work in
+  `/model`, sub-agent role models and the startup palette. Go and Rust SDKs
+  are supported (`phi::Model::direct` / `Model::served` in Rust); the wire is
+  documented for a future TS port.
+- The TypeScript SDK (`ext/ts`, `@pulseaiclub/phi-ext`) now supports model
+  registration too: `Extension.registerModel` with direct-connect models or
+  served ones (`conn: "ext"` + a `stream` handler). The frame pump keeps
+  reading while an async stream runs, so host `ModelCancel` aborts the
+  handler's `AbortSignal` mid-stream, like Go's `ctx`.
+- Composer recalls the last 10 submitted prompts per project with Up/Down (or
+  Ctrl+P/Ctrl+N), persisted under the project's session directory. Slash and
+  shell commands are not recorded. Off by default: set `PHI_PROMPT_HISTORY=on`
+  to enable it. When enabled, `?` lists the keys.
 
 ### Changed
-
-- Config editor: cache resolved rows across redraws.
 
 ### Deprecated
 
@@ -24,10 +36,50 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
+### Security
+
+## [0.29.0] - 2026-10-18
+
+### Added
+
+- `/diff` takes file paths: `/diff @path` (the composer's file completion) and
+  bare paths scope the overlay to those files, via a `--` separator so a file
+  named like a branch still reaches git as a pathspec. Multiple paths and
+  `staged` / `HEAD` / `<range>` combine with them.
+- Branch picker: `ctrl+x` then `y` deletes a local branch, refreshing the list in
+  place like `/sessions`. Unmerged branches are refused (`git branch -d`).
+- Skills: `disable-model-invocation: true` in a `SKILL.md` frontmatter keeps the
+  skill out of the system prompt catalog; it stays in the skills panel and is
+  still applied when picked there. See [README.md](README.md#skills).
+- Models: gateway aliases and explicit `preset` bindings.
+- Models: per-model `request_parameters` overrides for all four APIs,
+  including compaction.
+- Permissions: `permissions.rules` adds rules by tool, kind, command, path, or
+  workspace scope. Rules are evaluated strictest-first (`deny` > `ask` >
+  `allow`), so one can tighten a policy but never loosen it. See
+  [doc/permissions.md](doc/permissions.md).
+
+### Changed
+
+- Anthropic: reduce native-state tracking overhead.
+- Config editor: cache resolved rows across redraws.
+
+### Deprecated
+
+### Removed
+
+- Dead code: unused `internal/util/clipboard` text-write path (`CopyText` and the
+  Windows UTF-16 writer); copies go through the xui clipboard helper.
+
+### Fixed
+
+- Anthropic: correctly track input and cache token counts in streaming responses.
 - Gemini: tool calls carry the arguments the model produced instead of a
   decoded and re-encoded copy. The round trip reordered the keys and rounded
   integers through float64, so a large one reached the API as a different
   number.
+- `/diff HEAD <path>` shows that path against `HEAD` instead of ignoring the
+  path and printing the whole commit.
 - Responses: reject `background: true` before sending synchronous requests.
 - Models: prefer the actual model over routing prefixes when matching aliases.
 - Models: adapt GLM and DeepSeek thinking to API endpoints; configuration and
@@ -199,6 +251,10 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
+- Find tool on Windows: patterns naming a path segment (e.g. `src/pkg/a.go`) are
+  now translated to separator-agnostic regexes instead of relying on fd's glob
+  matching, which silently missed them there. Other platforms keep using fd
+  globs unchanged.
 - Config editor: add a `>` focus marker and bold the active field label so
   keyboard navigation remains visible when selection colors disappear.
 - TUI and config editor: detect Windows Terminal's truecolor support even when
@@ -1149,7 +1205,8 @@ Earlier releases are available from GitHub tags only.
 
 <!-- Released section ended -->
 
-[Unreleased]: https://github.com/pulseaiclub/phi/compare/v0.28.9...HEAD
+[Unreleased]: https://github.com/pulseaiclub/phi/compare/v0.29.0...HEAD
+[0.29.0]: https://github.com/pulseaiclub/phi/releases/tag/v0.29.0
 [0.28.9]: https://github.com/pulseaiclub/phi/releases/tag/v0.28.9
 [0.28.8]: https://github.com/pulseaiclub/phi/releases/tag/v0.28.8
 [0.28.7]: https://github.com/pulseaiclub/phi/releases/tag/v0.28.7

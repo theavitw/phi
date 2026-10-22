@@ -23,6 +23,7 @@
 你可以通过 [Skills（技能）](#skills技能)、[Extensions（扩展）](#extensions扩展)
 和 [MCP](#mcp) 扩展它——不必做成插件框架。
 
+- [赞助商](#赞助商)
 - [文档](https://pulseaiclub.github.io/docs/getting-started/)
 - [快速开始](#快速开始)
 - [资源占用](#资源占用)
@@ -40,6 +41,33 @@
 - [子代理](#子代理)
 - [工具](#工具)
 - [项目结构](doc/project-layout.md)
+
+## 赞助商
+
+<table>
+<tr>
+<td align="center" colspan="2"><a href="https://www.infistar.cc/register?aff=287HW56S&amp;ref_source=link"><img src="assets/infistar-banner.png" alt="Infistar.cc 无限星河" width="660" /></a></td>
+</tr>
+<tr>
+<td valign="top" width="50%"><strong>phi 由 <a href="https://www.infistar.cc/register?aff=287HW56S&amp;ref_source=link">Infistar.cc 无限星河</a> 赞助</strong>：一个 Key 打通主流模型，重度跑 agent 也不用算账。<br/><br/>⚙️ <strong>即插即用</strong>：配置 Base URL、API Key 与模型名称即可直接调用。<br/>🧩 <strong>全模型支持</strong>：单 Key 自由切换 Claude、GPT、Gemini、DeepSeek 等主流模型，不用再改配置。<br/>💰 <strong>实惠省心</strong>：部分模型低至官方 0.1 折，支持人民币结算与开票。<br/>🎁 <strong>phi 专属福利</strong>：通过<a href="https://www.infistar.cc/register?aff=287HW56S&amp;ref_source=link">专属链接</a>注册即领 <strong>$5 体验金</strong> 👉</td>
+<td valign="top" width="50%"><strong>免费 <code>~/.phi/config.yaml</code></strong>：整块模型配置 phi 直接给好，粘贴、填上 Key 就能跑。<br/><br/><pre>
+models:
+  - name: claude-opus-5-5     # 模型广场里任意模型 id
+    api: Anthropic            # 无限星河走 Anthropic Messages
+    base_url: https://infistar.cc
+    api_key: sk-...           # 你的无限星河 Key（或用 PHI_API_KEY）
+  - name: gpt-6-astra
+    api: OpenAIResponses      # /v1/responses
+    base_url: https://infistar.cc/v1
+    api_key: sk-...
+  - name: gemini-3-pro
+    api: Gemini
+    base_url: https://infistar.cc
+    api_key: sk-...
+    default: true
+</pre></td>
+</tr>
+</table>
 
 ## 快速开始
 
@@ -187,6 +215,7 @@ permissions:
 | `PHI_SKILL_PATH` | `skill_path` |
 | `PHI_THINK_LEVEL` | `models[].think_level`（默认模型；`off` 关闭思考） |
 | `PHI_OPTIMIZER` | 优化器功能的主开关（设为 `0`、`false`、`off`、`no` 可禁用） |
+| `PHI_PROMPT_HISTORY` | 输入框历史唤起（设为 `on` 开启；默认关闭，开启后会在项目会话目录写入 `prompts.json`） |
 | `TYPESAFE_API_KEY` | 使用优化器功能所需的 TypeSafe API 密钥 |
 
 **安全提示：** 开启优化器后，命令历史与上下文会发送到外部 TypeSafe 服务进行评判和排序。避免在可能包含敏感信息（API 密钥、令牌、凭证）的环境中使用优化器。
@@ -365,9 +394,15 @@ name: My Skill
  description: What this skill does
 license: MIT
 compatibility: claude, openai
+disable-model-invocation: false
 ---
 Instructions the agent should follow when this skill is relevant.
 ```
+
+`disable-model-invocation: true` 让技能不出现在 system prompt 的技能目录里，
+适合那些只想在需要时手动点名的技能。它仍留在技能面板里，从面板选中后照常生效。
+只有大小写不敏感的 `true` 判真，其它写法一律为 `false`。这只是目录过滤，不是
+权限控制：模型仍能用 `ls` / `find` 找到文件。
 
 在 TUI 中，可以从面板添加技能（技能 → 列表），然后在勾选所需技能后发送
 消息。

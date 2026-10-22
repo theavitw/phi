@@ -27,6 +27,7 @@ import (
 	"github.com/pulseaiclub/phi/internal/tui/pathutil"
 	"github.com/pulseaiclub/phi/internal/tui/submit"
 	"github.com/pulseaiclub/phi/internal/tui/transcript"
+	"github.com/pulseaiclub/phi/internal/util/gitx"
 	"github.com/pulseaiclub/phi/internal/util/update"
 	"github.com/pulseaiclub/phi/internal/version"
 )
@@ -100,6 +101,11 @@ func NewEditor(
 				shellhist.New(ctrl.SessionDir()), suggester,
 			))
 		}
+	}
+	// Prompt recall is opt-in: it persists what the user typed under the home
+	// directory, so it stays off until PHI_PROMPT_HISTORY turns it on.
+	if dir := ctrl.SessionDir(); dir != "" && shellhist.PromptsEnabled() {
+		e.composer.SetPromptHistory(shellhist.NewPromptHistory(dir))
 	}
 	e.transcript = transcript.NewTranscriptPane(theme, e.footer.Spinner(), "Phi "+version.Version)
 	e.transcript.SetUsageCallback(e.footer.UpdateTokenDisplay)
@@ -183,7 +189,10 @@ func NewEditor(
 			e.composer.ShowSessionList(items, currentID, e.sessions.Accept, e.sessions.Delete)
 		},
 		e.composer.RefreshSessionList,
-		e.composer.ShowBranchList,
+		func(branches []gitx.Branch, recent []string, onAccept, onDelete func(name string)) {
+			e.composer.ShowBranchList(branches, recent, onAccept, onDelete)
+		},
+		e.composer.RefreshBranchList,
 		func() string { return e.cwd },
 		e.submitter.StreamActive,
 	)
