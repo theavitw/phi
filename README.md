@@ -20,6 +20,7 @@
 
 ![phi diff review](assets/diff.png)
 
+- [Sponsors](#sponsors)
 - [Docs](https://pulseaiclub.github.io/docs/getting-started/)
 - [Quick start](#quick-start)
 - [Footprint](#footprint)
@@ -36,6 +37,32 @@
 - [MCP](#mcp)
 - [Tools](#tools)
 - [Project layout](doc/project-layout.md)
+
+## Sponsors
+
+<table>
+<tr>
+<td align="center" colspan="2"><a href="https://www.infistar.cc/register?aff=287HW56S&amp;ref_source=link"><img src="assets/infistar-banner.png" alt="Infistar.cc" width="660" /></a></td>
+</tr>
+<tr>
+<td valign="top" width="50%"><strong>phi is sponsored by <a href="https://www.infistar.cc/register?aff=287HW56S&amp;ref_source=link">Infistar.cc</a></strong> — one API key for every major model, priced for people who run agents all day.<br/><br/>⚙️ <strong>Plug and play</strong>: set the base URL, API key, and model name, then call it directly.<br/>🧩 <strong>One key, every model</strong>: switch between Claude, GPT, Gemini, DeepSeek, and other leading models without editing config again.<br/>💰 <strong>Cheap and simple</strong>: some models cost as little as 1% of official rates, with RMB billing and invoices.<br/>🎁 <strong>phi perk</strong>: <a href="https://www.infistar.cc/register?aff=287HW56S&amp;ref_source=link">register through our link</a> and get <strong>$5 in trial credits</strong> 👉</td>
+<td valign="top" width="50%"><strong>Free <code>~/.phi/config.yaml</code></strong> — phi ships the whole model block; paste it, swap in your key, start.<br/><br/><pre>
+models:
+    - name: claude-opus-5-5
+      api_key: ""
+      base_url: https://infistar.cc
+      api: Anthropic
+    - name: gpt-6-astra
+      api_key: ""
+      base_url: https://infistar.cc/v1
+      api: OpenAIResponses
+    - name: gemini-3-pro
+      api_key: ""
+      base_url: https://infistar.cc
+      api: Gemini
+</pre></td>
+</tr>
+</table>
 
 ## Quick start
 
@@ -179,6 +206,11 @@ permissions:
       - "go test ./..."
     deny:
       - "rm -rf *"
+  rules:                  # extra rules; deny > ask > allow, always
+    - kind: read
+      resource: url
+      decision: ask
+      reason: external lookup needs approval
 ```
 
 Built-in presets and thinking wire formats: [doc/models.md](doc/models.md).
@@ -193,6 +225,7 @@ Environment overrides:
 | `PHI_SKILL_PATH` | `skill_path`       |
 | `PHI_THINK_LEVEL` | `models[].think_level` (default model; `off` disables) |
 | `PHI_OPTIMIZER`  | Master on/off switch for optimizer features (`0`, `false`, `off`, `no` to disable) |
+| `PHI_PROMPT_HISTORY` | Composer prompt recall (`on` enables; off by default, writes `prompts.json` in the project's session directory) |
 | `TYPESAFE_API_KEY` | TypeSafe API key required for optimizer features |
 
 **Security:** When `PHI_OPTIMIZER` is enabled, command history and context are sent to an external TypeSafe service for judging and ranking. Avoid using the optimizer in environments where shell history may contain sensitive information (API keys, tokens, credentials).
@@ -257,6 +290,13 @@ line notes, then hand them to the agent without leaving the terminal.
 | `/diff` | Working tree (`git diff`) |
 | `/diff staged` | Staged changes |
 | `/diff HEAD` | Last commit (`git show`) |
+| `/diff @path` | Only that file — `@` comes from file completion, the `--` separator is added for you |
+| `/diff staged @a.go @b.go` | Staged changes in two files |
+| `/diff HEAD @path` | That file against `HEAD` |
+| `/diff main..feat @path` | That file across a range |
+
+`/diff -- <argv>` runs the given git command instead of a diff —
+`/diff -- git show HEAD~1` for one.
 
 Slash-picker Enter inserts `/diff` plus a trailing space into the composer; submit to open. Inside the overlay:
 `s` side-by-side, `i` add/edit a note, `x` delete, `a` send notes to the agent,
@@ -391,9 +431,16 @@ name: My Skill
  description: What this skill does
 license: MIT
 compatibility: claude, openai
+disable-model-invocation: false
 ---
 Instructions the agent should follow when this skill is relevant.
 ```
+
+`disable-model-invocation: true` keeps a skill out of the system prompt catalog
+— good for the ones you only want on explicit request. It stays in the skills
+panel and is still applied when you pick it there. Only a case-insensitive
+`true` counts; any other value means `false`. This is a catalog filter, not
+access control: the model can still find the file with `ls` / `find`.
 
 In the TUI, add skills from the palette (skills → list), then submit the
 message with the selected skills applied.
@@ -413,10 +460,13 @@ Modes:
 | `autopilot`        | Fold `ask` → allow, run unattended.                 |
 | `headless-strict`  | Fold `ask` → deny (used by `phi run`).              |
 
-Per-tool rules: `bash.default` / `bash.allow` / `bash.deny` (exact command
-prefix matching). Global keys:
+Per-tool rules: `bash.default` / `bash.allow` / `bash.deny` (regexes against
+the command). `permissions.rules` adds your own rules by tool, kind, command,
+path, or workspace scope; they are evaluated strictest-first (`deny` > `ask` >
+`allow`), so a rule can tighten a policy but never loosen one. Global keys:
 `workspace_only_writes` (default true), `ask_timeout_sec`, and
-`dangerously_allow_all` (default false).
+`dangerously_allow_all` (default false). Full semantics and examples:
+[doc/permissions.md](doc/permissions.md).
 
 In the TUI, an approval dialog replaces the editor with options to approve,
 deny with feedback, or allow all for the session / for every session. The

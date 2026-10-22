@@ -19,6 +19,7 @@ import (
 	"github.com/pulseaiclub/phi/internal/components/palette"
 	"github.com/pulseaiclub/phi/internal/components/sessionlist"
 	"github.com/pulseaiclub/phi/internal/components/toast"
+	"github.com/pulseaiclub/phi/internal/debuglog"
 	"github.com/pulseaiclub/phi/internal/session"
 	"github.com/pulseaiclub/phi/internal/tui/commands"
 	"github.com/pulseaiclub/phi/internal/tui/controller"
@@ -71,6 +72,10 @@ type ComposerPane struct {
 	requestFocus          func(components.Widget)
 	ctrlClose             func()
 	imageEnabled          func() bool
+
+	// promptHistory is the per-project recall ring behind Up/Down; nil when
+	// the session directory is unavailable.
+	promptHistory PromptHistory
 }
 
 // NewComposerPane builds composer widgets; call Wire before use.
@@ -140,6 +145,7 @@ func (c *ComposerPane) Wire(
 	c.palette.FocusReturn = &c.Chat
 	c.listPicker.FocusReturn = &c.Chat
 	c.Chat.OnSubmit = func(text string) {
+		c.rememberPrompt(text)
 		c.bus.Publish(controller.SubmitMsg{Text: text})
 		if c.drainBus != nil {
 			c.drainBus()
@@ -243,12 +249,38 @@ func (c *ComposerPane) ShowBranchList(
 	branches []gitx.Branch,
 	recent []string,
 	onAccept func(name string),
+	onDelete func(name string),
 ) {
+	// Rows carry their own ref (origin/feat and feat are two branches), while
+	// accepting a remote row means checking out the local branch that tracks
+	// it: git switch refuses a remote-tracking ref outright.
+	targets := make(map[string]string, len(branches))
+	for _, b := range branches {
+		targets[b.Name] = b.LocalName()
+	}
+	// A nil delete stays nil so the picker keeps ctrl+x inert instead of arming
+	// a confirm nobody answers.
+	var onDeleteItem func(listpicker.Item)
+	if onDelete != nil {
+		onDeleteItem = func(item listpicker.Item) { onDelete(item.ID) }
+	}
 	c.ShowList(branchlist.Items(branches, recent), branchlist.Config(), func(item listpicker.Item) {
 		if onAccept != nil {
-			onAccept(item.ID)
+			onAccept(targets[item.ID])
 		}
-	}, nil)
+	}, onDeleteItem)
+}
+
+// RefreshBranchList swaps the rows of an open branch picker in place, keeping
+// the filter query — used after a delete instead of reopening.
+func (c *ComposerPane) RefreshBranchList(branches []gitx.Branch, recent []string) {
+	if !c.listPicker.Open {
+		return
+	}
+	c.listPicker.SetItems(branchlist.Items(branches, recent))
+	if c.onRedraw != nil {
+		c.onRedraw()
+	}
 }
 
 // ListOverlay returns the list picker surface when open.
@@ -263,16 +295,45 @@ func (c *ComposerPane) ListOverlay(ctx components.DrawContext) (components.SubSu
 	}, true
 }
 
+// SetPromptHistory installs the per-project recall ring and loads what is
+// already stored. A nil store leaves the composer without recall.
+func (c *ComposerPane) SetPromptHistory(h PromptHistory) {
+	c.promptHistory = h
+	if h != nil {
+		c.Chat.History = h.Entries()
+	}
+}
+
+// rememberPrompt records a submitted prompt so Up can recall it later. Slash
+// and shell commands are skipped: they are already reachable by typing, and
+// recalling a "!" line would run it on Enter.
+func (c *ComposerPane) rememberPrompt(text string) {
+	if c.promptHistory == nil {
+		return
+	}
+	text = strings.TrimSpace(text)
+	if text == "" || strings.HasPrefix(text, "/") || strings.HasPrefix(text, "!") {
+		return
+	}
+	if err := c.promptHistory.Append(text); err != nil {
+		debuglog.Logf("composer: record prompt history: %v", err)
+		return
+	}
+	c.Chat.History = c.promptHistory.Entries()
+}
+
 // ClearInput clears the chat composer text.
 func (c *ComposerPane) ClearInput() {
 	c.Chat.Value = ""
 	c.Chat.Cursor = 0
+	c.Chat.ResetHistoryBrowse()
 }
 
 // SetInput replaces the composer text and places the cursor at the end.
 func (c *ComposerPane) SetInput(text string) {
 	c.Chat.Value = text
 	c.Chat.Cursor = len(text)
+	c.Chat.ResetHistoryBrowse()
 }
 
 // PendingSkills returns attached skill names awaiting submit.
@@ -805,7 +866,7 @@ func (c *ComposerPane) onQuestionChange(active bool, query string) {
 	c.abandonMentionSearch()
 	c.slash.Hide()
 	c.Chat.SlashOpen = false
-	items := filterQuestionItems(query, questionShortcutItems())
+	items := filterQuestionItems(query, questionShortcutItems(c.promptHistory != nil))
 	status := ""
 	if len(items) == 0 {
 		status = "No matching shortcuts"
